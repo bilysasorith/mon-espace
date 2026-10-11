@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mon espace</title>
+  <meta name="description" content="Pense-bête, objectifs, finances et recherches personnelles.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M9 17l5 5 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Mon espace</span>
+      </div>
+      <nav class="nav" aria-label="Navigation principale">
+        <a href="#accueil" data-route="accueil"><span class="ico" aria-hidden="true">⌂</span><span>Accueil</span></a>
+        <a href="#pense-bete" data-route="pense-bete"><span class="ico" aria-hidden="true">✎</span><span>Pense-bête</span></a>
+        <a href="#objectifs" data-route="objectifs"><span class="ico" aria-hidden="true">◎</span><span>Objectifs</span></a>
+        <a href="#finances" data-route="finances"><span class="ico" aria-hidden="true">€</span><span>Finances</span></a>
+        <a href="#recherches" data-route="recherches"><span class="ico" aria-hidden="true">⚲</span><span>Recherches</span></a>
+        <a href="#donnees" data-route="donnees"><span class="ico" aria-hidden="true">⇅</span><span>Données</span></a>
+      </nav>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Changer de thème">◐ <span>Thème</span></button>
+    </aside>
+    <main class="main" id="view" tabindex="-1"></main>
+  </div>
+
+  <dialog id="modal" class="modal"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
