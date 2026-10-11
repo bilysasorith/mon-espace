@@ -332,7 +332,7 @@
         <input type="checkbox" data-act="done" ${n.done ? 'checked' : ''} aria-label="Marquer comme fait" style="margin-top:3px">
         <div>
           ${n.title ? `<div class="note-title">${esc(n.title)}</div>` : ''}
-          <div class="note-text">${linkify(esc(n.text))}</div>
+          ${n.text ? `<div class="note-text">${linkify(esc(n.text))}</div>` : ''}
           ${(n.due || n.tag) ? `<div class="note-meta">${n.done ? '' : dueTag(n.due)}${n.tag ? `<span class="tag">#${esc(n.tag)}</span>` : ''}</div>` : ''}
         </div>
         <div class="note-actions">
@@ -353,8 +353,8 @@
       <form>
         <h2 class="modal-title">${n ? 'Modifier la note' : 'Nouvelle note'}</h2>
         <div class="form-grid">
-          <div class="field full"><label>Titre (optionnel)</label><input class="input" name="title" value="${esc(n ? n.title : '')}"></div>
-          <div class="field full"><label>Contenu</label><textarea class="input" name="text" required>${esc(n ? n.text : '')}</textarea></div>
+          <div class="field full"><label>Titre</label><input class="input" name="title" value="${esc(n ? n.title : '')}"></div>
+          <div class="field full"><label>Contenu (optionnel)</label><textarea class="input" name="text">${esc(n ? n.text : '')}</textarea></div>
           <div class="field"><label>Échéance</label><input class="input" type="date" name="due" value="${esc(n ? n.due : '')}"></div>
           <div class="field"><label>Étiquette</label><input class="input" name="tag" list="tagList" placeholder="ex. courses, admin" value="${esc(n ? n.tag : '')}">
             <datalist id="tagList">${tags.map(t => `<option value="${esc(t)}">`).join('')}</datalist></div>
@@ -367,7 +367,7 @@
       </form>`, {
       onSubmit: d => {
         const vals = { title: d.title.trim(), text: d.text.trim(), due: d.due, tag: d.tag.trim().replace(/^#/, ''), pinned: !!d.pinned };
-        if (!vals.text) return false;
+        if (!vals.title && !vals.text) { toast('Mets au moins un titre ou un contenu'); return false; }
         if (n) Object.assign(n, vals);
         else state.notes.push({ id: uid(), done: false, createdAt: Date.now(), ...vals });
         save(); renderNotes();
