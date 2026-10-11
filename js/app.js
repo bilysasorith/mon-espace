@@ -30,7 +30,8 @@
         categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
         rules: DEFAULT_RULES.map(r => ({ ...r }))
       },
-      research: []
+      research: [],
+      appointments: []
     };
   }
 
@@ -58,7 +59,8 @@
         categories: f.categories && f.categories.revenu && f.categories.depense ? f.categories : base.finance.categories,
         rules: Array.isArray(f.rules) ? f.rules : base.finance.rules
       },
-      research: Array.isArray(s.research) ? s.research : []
+      research: Array.isArray(s.research) ? s.research : [],
+      appointments: Array.isArray(s.appointments) ? s.appointments : []
     };
   }
 
@@ -153,6 +155,7 @@
   const routes = {
     'accueil': renderHome,
     'pense-bete': renderNotes,
+    'rendez-vous': renderAppointments,
     'objectifs': renderGoals,
     'finances': renderFinance,
     'recherches': renderResearch,
@@ -198,6 +201,7 @@
     const goals = state.goals.filter(g => goalProgress(g) < 1).sort((a, b) => goalProgress(b) - goalProgress(a));
     const mk = currentMonth();
     const m = monthTotals(mk);
+    const upcoming = state.appointments.map(a => ({ a, st: apptStatus(a) })).filter(x => x.st.order <= 30).sort((x, y) => x.st.order - y.st.order).slice(0, 5);
 
     view.innerHTML = `
       <div class="page-head">
@@ -212,6 +216,11 @@
           ${todo.length ? `<ul class="home-list">${todo.slice(0, 6).map(n => `
             <li><span>${n.pinned ? '📌 ' : ''}${esc(n.title || n.text.split('\n')[0])}</span>${dueTag(n.due)}</li>`).join('')}</ul>`
             : '<div class="empty">Rien à faire pour l’instant.</div>'}
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>Rendez-vous</h2><a class="link-more" href="#rendez-vous">Tout voir →</a></div>
+          ${upcoming.length ? `<ul class="home-list">${upcoming.map(({ a, st }) => `<li><span>${esc(a.name)}</span>${st.html}</li>`).join('')}</ul>`
+            : '<div class="empty">Rien à prévoir dans les 30 prochains jours.</div>'}
         </section>
         <section class="card">
           <div class="card-head"><h2>Objectifs en cours</h2><a class="link-more" href="#objectifs">Tout voir →</a></div>
@@ -229,7 +238,7 @@
             <div class="kpi"><div class="label">Solde</div><div class="value num ${m.solde >= 0 ? 'pos' : 'neg'}" style="font-size:20px">${eur0.format(m.solde)}</div></div>
           </div>
         </section>
-        <section class="card">
+        <section class="card" style="grid-column:1/-1">
           <div class="card-head"><h2>Recherches récentes</h2><a class="link-more" href="#recherches">Tout voir →</a></div>
           ${state.research.length ? `<ul class="home-list">${state.research.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 5).map(r => `
             <li><a href="#recherches/${esc(r.id)}">${esc(r.title)}</a><span class="muted small">${r.items.length} élément${r.items.length > 1 ? 's' : ''}</span></li>`).join('')}</ul>`
@@ -245,7 +254,7 @@
   }
 
   function isEmpty() {
-    return !state.notes.length && !state.goals.length && !state.finance.transactions.length && !state.research.length;
+    return !state.notes.length && !state.goals.length && !state.finance.transactions.length && !state.research.length && !state.appointments.length;
   }
 
   /* =========================================================
@@ -1320,6 +1329,229 @@
   }
 
   /* =========================================================
+     RENDEZ-VOUS RÉCURRENTS
+     ========================================================= */
+  const addInterval = (iso, n, unit) => {
+    const d = new Date(iso + 'T00:00');
+    if (unit === 'semaines') d.setDate(d.getDate() + n * 7);
+    else {
+      const day = d.getDate();
+      d.setDate(1); d.setMonth(d.getMonth() + n);
+      d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+    }
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+  const lastVisit = a => (a.history || []).slice().sort((x, y) => x.date < y.date ? 1 : -1)[0] || null;
+  const freqLabel = a => a.everyN === 1 ? (a.unit === 'semaines' ? 'Chaque semaine' : 'Chaque mois') : `Toutes les ${a.everyN} ${a.unit}`;
+
+  // Prochaine échéance : le RDV pris s'il existe, sinon la dernière visite + la fréquence.
+  function apptNext(a) {
+    if (a.nextDate) return { date: a.nextDate, booked: true };
+    const l = lastVisit(a);
+    if (l && a.everyN > 0) return { date: addInterval(l.date, a.everyN, a.unit), booked: false };
+    return null;
+  }
+
+  function apptStatus(a) {
+    const n = apptNext(a);
+    if (!n) return { order: 1e6, html: '<span class="tag">Pas encore de visite notée</span>' };
+    const days = daysUntil(n.date);
+    if (n.booked) {
+      const when = days === 0 ? 'aujourd’hui' : days === 1 ? 'demain' : `le ${fmtDate(n.date)}`;
+      return { order: days, html: `<span class="tag ${days <= 7 ? 'soon' : ''} ${days < 0 ? 'late' : ''}">📅 RDV ${when}${a.nextTime ? ' à ' + esc(a.nextTime) : ''}</span>` };
+    }
+    if (days < 0) return { order: days, html: `<span class="tag late">À prendre · prévu vers le ${fmtDate(n.date)}</span>` };
+    if (days <= 14) return { order: days, html: `<span class="tag soon">À prendre bientôt · vers le ${fmtDate(n.date)}</span>` };
+    return { order: days, html: `<span class="tag">Prochain vers le ${fmtDate(n.date)}</span>` };
+  }
+
+  // Coût moyen par mois : prix moyen des visites (ou prix prévu) ramené à la fréquence.
+  function apptMonthly(a) {
+    const prices = (a.history || []).map(h => Number(h.price)).filter(p => p > 0);
+    const avg = prices.length ? prices.reduce((s, p) => s + p, 0) / prices.length : Number(a.expectedPrice) || 0;
+    if (!avg || !a.everyN) return 0;
+    const months = a.unit === 'semaines' ? a.everyN * 7 / 30.44 : a.everyN;
+    return avg / months;
+  }
+
+  function renderAppointments() {
+    const list = state.appointments.slice().sort((x, y) => apptStatus(x).order - apptStatus(y).order);
+    const monthly = state.appointments.reduce((s, a) => s + apptMonthly(a), 0);
+    view.innerHTML = `
+      <div class="page-head">
+        <div><h1>Rendez-vous</h1><p class="muted">Tes RDV qui reviennent : coiffeur, ongles, médecin… avec ce que tu as fait et payé.</p></div>
+        <div class="toolbar"><button class="btn primary" id="newAppt">+ Nouveau RDV récurrent</button></div>
+      </div>
+      ${list.length ? `
+        <p class="muted small" style="margin:-8px 0 16px">Budget moyen : <strong class="num" style="color:var(--text)">${eur0.format(monthly)} / mois</strong>, soit ${eur0.format(monthly * 12)} par an.</p>
+        <div class="grid grid-2">${list.map(apptHTML).join('')}</div>`
+      : '<div class="card empty">Ajoute ton premier RDV récurrent, par exemple « Coiffeur, toutes les 6 semaines ». À chaque visite, tu notes la date, le prix et ce que tu as fait, et le site te dit quand reprendre RDV.</div>'}
+    `;
+    $('#newAppt').addEventListener('click', () => apptForm());
+    $$('.appt', view).forEach(el => {
+      const a = state.appointments.find(x => x.id === el.dataset.id);
+      $('[data-act=done]', el).addEventListener('click', () => visitForm(a));
+      $('[data-act=book]', el).addEventListener('click', () => bookForm(a));
+      $('[data-act=edit]', el).addEventListener('click', () => apptForm(a));
+      $('[data-act=del]', el).addEventListener('click', () => confirmBox(`Supprimer « ${a.name} » et son historique ? Les dépenses déjà ajoutées aux finances restent.`, () => {
+        state.appointments = state.appointments.filter(x => x !== a); save(); renderAppointments();
+      }));
+      $$('[data-act=delvisit]', el).forEach(b => b.addEventListener('click', () => {
+        const h = a.history.find(x => x.id === b.dataset.v);
+        confirmBox(`Supprimer la visite du ${fmtDate(h.date)}${h.txId ? ' et la dépense liée dans Finances' : ''} ?`, () => {
+          a.history = a.history.filter(x => x !== h);
+          if (h.txId) state.finance.transactions = state.finance.transactions.filter(t => t.id !== h.txId);
+          save(); renderAppointments();
+        });
+      }));
+      $$('[data-act=editvisit]', el).forEach(b => b.addEventListener('click', () => visitForm(a, a.history.find(x => x.id === b.dataset.v))));
+    });
+  }
+
+  function apptHTML(a) {
+    const st = apptStatus(a);
+    const hist = (a.history || []).slice().sort((x, y) => x.date < y.date ? 1 : -1);
+    const l = hist[0];
+    return `
+      <article class="card appt stack" style="gap:12px" data-id="${esc(a.id)}">
+        <div class="goal-top">
+          <div>
+            <h3>${esc(a.name)}</h3>
+            <div class="muted small">${esc(freqLabel(a))}${a.place ? ' · ' + esc(a.place) : ''}</div>
+          </div>
+          <div class="note-actions">
+            <button class="icon-btn" data-act="edit" title="Modifier">✎</button>
+            <button class="icon-btn" data-act="del" title="Supprimer">✕</button>
+          </div>
+        </div>
+        <div>${st.html}</div>
+        <div class="grid grid-2" style="gap:10px">
+          <div class="kpi"><div class="label">Dernière fois</div>
+            <div class="num" style="font-weight:600">${l ? `${fmtDate(l.date)} · ${l.price ? money(l.price) : 'prix non noté'}` : '—'}</div>
+            ${l && l.note ? `<div class="small muted">${esc(l.note)}</div>` : ''}</div>
+          <div class="kpi"><div class="label">Prochaine fois (prévu)</div>
+            <div class="num" style="font-weight:600">${a.expectedPrice ? money(a.expectedPrice) : '—'}</div>
+            ${a.nextNote ? `<div class="small muted">${esc(a.nextNote)}</div>` : ''}</div>
+        </div>
+        <div class="toolbar">
+          <button class="btn sm primary" data-act="done">✓ C’est fait</button>
+          <button class="btn sm" data-act="book">${a.nextDate ? 'Changer la date du RDV' : 'J’ai pris RDV'}</button>
+        </div>
+        ${hist.length ? `<details><summary class="small muted" style="cursor:pointer">Historique (${hist.length})</summary>
+          <table class="table" style="margin-top:6px"><tbody>${hist.map(h => `
+            <tr><td class="num" style="white-space:nowrap">${fmtDate(h.date)}</td><td class="small">${esc(h.note || '')}</td>
+            <td class="right num" style="white-space:nowrap">${h.price ? money(h.price) : '—'}</td>
+            <td class="right" style="white-space:nowrap"><button class="icon-btn" data-act="editvisit" data-v="${esc(h.id)}" title="Modifier">✎</button><button class="icon-btn" data-act="delvisit" data-v="${esc(h.id)}" title="Supprimer">✕</button></td></tr>`).join('')}
+          </tbody></table></details>` : ''}
+      </article>`;
+  }
+
+  function apptForm(a) {
+    const cats = state.finance.categories.depense;
+    const defCat = a ? a.category : (cats.find(c => /beaut/i.test(c)) || cats[0]);
+    openModal(`
+      <form>
+        <h2 class="modal-title">${a ? 'Modifier le RDV récurrent' : 'Nouveau RDV récurrent'}</h2>
+        <div class="form-grid">
+          <div class="field full"><label>Quoi</label><input class="input" name="name" required placeholder="ex. Coiffeur" value="${esc(a ? a.name : '')}"></div>
+          <div class="field"><label>Fréquence</label><div style="display:flex;gap:6px;align-items:center">
+            <span class="muted small">Tous les</span>
+            <input class="input num" type="number" min="1" name="everyN" value="${esc(a ? a.everyN : 6)}" style="width:70px">
+            <select class="input" name="unit" style="width:auto">${['semaines', 'mois'].map(u => `<option ${a && a.unit === u || !a && u === 'semaines' ? 'selected' : ''}>${u}</option>`).join('')}</select></div></div>
+          <div class="field"><label>Où / contact</label><input class="input" name="place" placeholder="ex. Salon Léa, 01 23 45 67 89" value="${esc(a ? a.place : '')}"></div>
+          <div class="field"><label>Prix prévu la prochaine fois (€)</label><input class="input num" name="expectedPrice" inputmode="decimal" value="${a && a.expectedPrice ? String(a.expectedPrice).replace('.', ',') : ''}"></div>
+          <div class="field"><label>Catégorie dans Finances</label><select class="input" name="category">${cats.map(c => `<option ${c === defCat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+          <div class="field full"><label>Prochaine fois, je veux…</label><input class="input" name="nextNote" placeholder="ex. couleur + coupe" value="${esc(a ? a.nextNote : '')}"></div>
+          ${a ? '' : `<div class="field"><label>Dernière visite (optionnel)</label><input class="input" type="date" name="lastDate"></div>
+          <div class="field"><label>Prix payé la dernière fois (€)</label><input class="input num" name="lastPrice" inputmode="decimal"></div>
+          <div class="field full"><label>Ce que j’ai fait la dernière fois</label><input class="input" name="lastNote" placeholder="ex. coupe + brushing"></div>`}
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Annuler</button>
+          <button class="btn primary">Enregistrer</button>
+        </div>
+      </form>`, {
+      onSubmit: d => {
+        const vals = {
+          name: d.name.trim(), everyN: Math.max(1, Number(d.everyN) || 1), unit: d.unit, place: d.place.trim(),
+          expectedPrice: parseAmount(d.expectedPrice) || 0, category: d.category, nextNote: d.nextNote.trim()
+        };
+        if (a) Object.assign(a, vals);
+        else {
+          const na = { id: uid(), createdAt: Date.now(), nextDate: '', nextTime: '', history: [], ...vals };
+          if (d.lastDate) na.history.push({ id: uid(), date: d.lastDate, price: parseAmount(d.lastPrice) || 0, note: d.lastNote.trim() });
+          state.appointments.push(na);
+        }
+        save(); renderAppointments();
+      }
+    });
+  }
+
+  function bookForm(a) {
+    const n = apptNext(a);
+    openModal(`
+      <form>
+        <h2 class="modal-title">RDV · ${esc(a.name)}</h2>
+        <div class="form-grid">
+          <div class="field"><label>Date</label><input class="input" type="date" name="date" required value="${esc(a.nextDate || (n ? n.date : todayISO()))}"></div>
+          <div class="field"><label>Heure (optionnel)</label><input class="input" type="time" name="time" value="${esc(a.nextTime || '')}"></div>
+        </div>
+        <div class="modal-actions">
+          ${a.nextDate ? '<button type="button" class="btn danger" id="unbook" style="margin-right:auto">Annuler le RDV</button>' : ''}
+          <button type="button" class="btn" data-close>Fermer</button>
+          <button class="btn primary">Enregistrer</button>
+        </div>
+      </form>`, {
+      onOpen: m => { const u = $('#unbook', m); if (u) u.addEventListener('click', () => { a.nextDate = ''; a.nextTime = ''; save(); closeModal(); renderAppointments(); }); },
+      onSubmit: d => { a.nextDate = d.date; a.nextTime = d.time; save(); renderAppointments(); }
+    });
+  }
+
+  function visitForm(a, h) {
+    const t = todayISO();
+    const date = h ? h.date : (a.nextDate && a.nextDate <= t ? a.nextDate : t);
+    const linked = h && h.txId && state.finance.transactions.find(x => x.id === h.txId);
+    const price = h ? h.price : a.expectedPrice;
+    openModal(`
+      <form>
+        <h2 class="modal-title">${h ? 'Modifier la visite' : 'C’est fait'} · ${esc(a.name)}</h2>
+        <div class="form-grid">
+          <div class="field"><label>Date</label><input class="input" type="date" name="date" required value="${esc(date)}"></div>
+          <div class="field"><label>Prix payé (€)</label><input class="input num" name="price" inputmode="decimal" value="${price ? String(price).replace('.', ',') : ''}"></div>
+          <div class="field full"><label>Ce que j’ai fait</label><input class="input" name="note" value="${esc(h ? h.note : a.nextNote || '')}" placeholder="ex. coupe + couleur"></div>
+          ${h ? '' : `<div class="field full"><label>Prix prévu la prochaine fois (€)</label><input class="input num" name="expectedPrice" inputmode="decimal" value="${a.expectedPrice ? String(a.expectedPrice).replace('.', ',') : ''}"></div>`}
+          <label class="check full"><input type="checkbox" name="toFinance" ${!h || linked ? 'checked' : ''}> Ajouter la dépense dans Finances (${esc(a.category)})</label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Annuler</button>
+          <button class="btn primary">Enregistrer</button>
+        </div>
+      </form>`, {
+      onSubmit: d => {
+        const p = parseAmount(d.price) || 0;
+        const v = h || { id: uid() };
+        Object.assign(v, { date: d.date, price: p, note: d.note.trim() });
+        let tx = v.txId && state.finance.transactions.find(x => x.id === v.txId);
+        if (d.toFinance && p > 0) {
+          const vals = { type: 'depense', amount: p, date: v.date, label: a.name + (v.note ? ' · ' + v.note : ''), category: a.category };
+          if (tx) Object.assign(tx, vals);
+          else { tx = { id: uid(), source: 'rdv', ...vals }; state.finance.transactions.push(tx); v.txId = tx.id; }
+        } else if (tx) {
+          state.finance.transactions = state.finance.transactions.filter(x => x !== tx); delete v.txId;
+        }
+        if (!h) {
+          a.history.push(v);
+          if (a.nextDate && a.nextDate <= d.date) { a.nextDate = ''; a.nextTime = ''; }
+          const ep = parseAmount(d.expectedPrice);
+          if (!isNaN(ep)) a.expectedPrice = ep;
+        }
+        save(); renderAppointments();
+        toast(d.toFinance && p > 0 ? 'Visite notée et ajoutée aux finances' : 'Visite notée');
+      }
+    });
+  }
+
+  /* =========================================================
      DONNÉES
      ========================================================= */
   function renderData() {
@@ -1331,7 +1563,7 @@
           <h2>Sauvegarder</h2>
           <p class="muted small" style="margin:0">Télécharge un fichier avec toutes tes données. Fais-le régulièrement : si tu vides ton navigateur, tout est perdu sans sauvegarde.</p>
           <div><button class="btn primary" id="exportBtn">Exporter (JSON)</button></div>
-          <p class="muted small" style="margin:0">${state.notes.length} notes · ${state.goals.length} objectifs · ${state.finance.transactions.length} opérations · ${state.research.length} benchmarks · ${(size / 1024).toFixed(1)} Ko</p>
+          <p class="muted small" style="margin:0">${state.notes.length} notes · ${state.goals.length} objectifs · ${state.finance.transactions.length} opérations · ${state.research.length} benchmarks · ${state.appointments.length} RDV récurrents · ${(size / 1024).toFixed(1)} Ko</p>
         </section>
         <section class="card stack" style="gap:10px">
           <h2>Restaurer / consulter sur un autre appareil</h2>
@@ -1429,6 +1661,11 @@
         { id: uid(), fav: false, values: v('C E Ferulic', 'SkinCeuticals', 175, '30 ml', 5, 'Vitamine C 15 %, vitamine E, acide férulique', 'La référence mais hors budget', 'skinceuticals.fr') },
         { id: uid(), fav: false, values: v('Sérum Vitamine C10', 'La Roche-Posay', 39, '30 ml', 4, 'Vitamine C 10 %, acide salicylique', 'Texture agréable, trouvé en pharmacie', '') }
       ]
+    });
+    state.appointments.push({
+      id: uid(), name: 'Coiffeur', everyN: 6, unit: 'semaines', place: 'Salon du quartier', expectedPrice: 45, category: 'Beauté & soins',
+      nextNote: 'Coupe + soin', nextDate: '', nextTime: '', createdAt: Date.now(),
+      history: [{ id: uid(), date: inDays(-50), price: 35, note: 'Coupe' }, { id: uid(), date: inDays(-92), price: 60, note: 'Coupe + couleur' }]
     });
     save();
   }
